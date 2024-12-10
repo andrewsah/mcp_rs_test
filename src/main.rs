@@ -61,6 +61,10 @@ struct JsonRpcError {
     data: Option<Value>,
 }
 
+trait JsonRpcResponse {
+    fn to_json(&self) -> Result<String, serde_json::Error>;
+}
+
 /// Represents a JSON-RPC response object according to the JSON-RPC 2.0 specification.
 /// See https://www.jsonrpc.org/specification
 #[derive(Serialize, Deserialize, Debug)]
@@ -73,6 +77,12 @@ struct JsonRpcResponseSuccess {
     result: Option<Value>,
 }
 
+impl JsonRpcResponse for JsonRpcResponseSuccess {
+    fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+}
+
 /// Represents a JSON-RPC response object according to the JSON-RPC 2.0 specification.
 /// See https://www.jsonrpc.org/specification
 #[derive(Serialize, Deserialize, Debug)]
@@ -83,6 +93,12 @@ struct JsonRpcResponseError {
     jsonrpc: String,
     /// Error information if the RPC call failed
     error: Option<JsonRpcError>,
+}
+
+impl JsonRpcResponse for JsonRpcResponseError {
+    fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
 }
 
 /// Represents a JSON-RPC notification object according to the JSON-RPC 2.0 specification.
@@ -98,14 +114,30 @@ struct JsonRpcNotification {
     params: Option<Value>,
 }
 
+fn send_response<T: JsonRpcResponse>(response: &T) {
+    let response_str = response.to_json();
+    match response_str {
+        Ok(s) => {
+            log::info!("Sending response: {}", s);
+            let mut stdout = io::stdout();
+            stdout.write_all(s.as_bytes()).unwrap();
+            stdout.write_all(b"\n").unwrap();
+            stdout.flush().unwrap();
+        }
+        Err(e) => log::error!("Error serializing response: {}", e),
+    }
+}
+
 fn handle_request(request: &JsonRpcRequest) {
     log::info!("handle_request: {:?}", request);
     match request.method.as_str() {
         "initialize" => {
             log::info!("Initializing server...");
             let mut result = Value::Object(Default::default());
-            result["protocolVersion"] = request.params.as_ref().unwrap()["protocolVersion"].clone();
+            result["protocolVersion"] = Value::String("2024-11-05".to_string());
             result["capabilities"] = Value::Object(Default::default());
+            result["capabilities"]["prompts"] = Value::Object(Default::default());
+            result["capabilities"]["prompts"]["listChanged"] = Value::Bool(true);
             result["serverInfo"] = Value::Object(Default::default());
             result["serverInfo"]["name"] = Value::String("MCP Rust test server".to_string());
             result["serverInfo"]["version"] = Value::String("0.1.0".to_string());
@@ -114,26 +146,33 @@ fn handle_request(request: &JsonRpcRequest) {
                 jsonrpc: "2.0".to_string(),
                 result: Some(result),
             };
-            let response_str = serde_json::to_string(&response);
-            match response_str {
-                Ok(s) => {
-                    log::info!("Sending response: {}", s);
-                    let mut stdout = io::stdout();
-                    stdout.write_all(s.as_bytes()).unwrap();
-                    stdout.write_all(b"\n").unwrap();
-                    stdout.flush().unwrap();
-                }
-                Err(e) => log::error!("Error serializing response: {}", e),
-            }
+            send_response(&response);
+        }
+        "ping" => {
+            log::info!("Client ping server...");
+            let response = JsonRpcResponseSuccess {
+                id: request.id.clone(),
+                jsonrpc: "2.0".to_string(),
+                result: Some(Value::Object(Default::default())),
+            };
+            send_response(&response);
         }
         _ => {
-            log::error!("Unknown method: {}", request.method);
+            log::error!("Unknown request method: {}", request.method);
         }
     }
 }
 
 fn handle_notification(notification: &JsonRpcNotification) {
     log::info!("handle_notification: {:?}", notification);
+    match notification.method.as_str() {
+        "notifications/initialized" => {
+            log::info!("Server initialized.");
+        }
+        _ => {
+            log::error!("Unknown notification method: {}", notification.method);
+        }
+    }
 }
 
 fn main() {
