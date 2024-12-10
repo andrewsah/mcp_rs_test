@@ -64,13 +64,23 @@ struct JsonRpcError {
 /// Represents a JSON-RPC response object according to the JSON-RPC 2.0 specification.
 /// See https://www.jsonrpc.org/specification
 #[derive(Serialize, Deserialize, Debug)]
-struct JsonRpcResponse {
+struct JsonRpcResponseSuccess {
     /// Identifier matching the id that was sent in the request
     id: JsonRpcId,
     /// JSON-RPC protocol version, must be "2.0"
     jsonrpc: String,
     /// Result of the RPC call if successful
     result: Option<Value>,
+}
+
+/// Represents a JSON-RPC response object according to the JSON-RPC 2.0 specification.
+/// See https://www.jsonrpc.org/specification
+#[derive(Serialize, Deserialize, Debug)]
+struct JsonRpcResponseError {
+    /// Identifier matching the id that was sent in the request
+    id: JsonRpcId,
+    /// JSON-RPC protocol version, must be "2.0"
+    jsonrpc: String,
     /// Error information if the RPC call failed
     error: Option<JsonRpcError>,
 }
@@ -94,15 +104,15 @@ fn handle_request(request: &JsonRpcRequest) {
         "initialize" => {
             log::info!("Initializing server...");
             let mut result = Value::Object(Default::default());
+            result["protocolVersion"] = request.params.as_ref().unwrap()["protocolVersion"].clone();
             result["capabilities"] = Value::Object(Default::default());
             result["serverInfo"] = Value::Object(Default::default());
             result["serverInfo"]["name"] = Value::String("MCP Rust test server".to_string());
             result["serverInfo"]["version"] = Value::String("0.1.0".to_string());
-            let response = JsonRpcResponse {
+            let response = JsonRpcResponseSuccess {
                 id: request.id.clone(),
                 jsonrpc: "2.0".to_string(),
                 result: Some(result),
-                error: None,
             };
             let response_str = serde_json::to_string(&response);
             match response_str {
@@ -134,7 +144,6 @@ fn main() {
         File::create("C:\\tmp\\my_rust_bin.log").unwrap(),
     );
 
-    let _stdout = io::stdout();
     let stdin = io::stdin();
 
     for line in stdin.lock().lines() {
