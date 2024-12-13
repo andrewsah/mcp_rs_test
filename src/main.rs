@@ -8,6 +8,17 @@ use std::{
     io::{self, BufRead, Write},
 };
 
+#[allow(dead_code)]
+const ERROR_CODE_PARSE_ERROR: i32 = -32700;
+#[allow(dead_code)]
+const ERROR_CODE_INVALID_REQUEST: i32 = -32600;
+#[allow(dead_code)]
+const ERROR_CODE_METHOD_NOT_FOUND: i32 = -32601;
+#[allow(dead_code)]
+const ERROR_CODE_INVALID_PARAMS: i32 = -32602;
+#[allow(dead_code)]
+const ERROR_CODE_INTERNAL_ERROR: i32 = -32603;
+
 /// Represents a JSON-RPC ID that can be either a number or string according to the JSON-RPC 2.0 specification
 /// See https://www.jsonrpc.org/specification#id1
 #[derive(Serialize, Deserialize, Debug)]
@@ -114,7 +125,7 @@ struct JsonRpcNotification {
     params: Option<Value>,
 }
 
-fn send_response<T: JsonRpcResponse>(response: &T) {
+fn send_response<T: JsonRpcResponse>(response: T) {
     let response_str = response.to_json();
     match response_str {
         Ok(s) => {
@@ -136,8 +147,8 @@ fn handle_request(request: &JsonRpcRequest) {
             let mut result = Value::Object(Default::default());
             result["protocolVersion"] = Value::String("2024-11-05".to_string());
             result["capabilities"] = Value::Object(Default::default());
-            result["capabilities"]["prompts"] = Value::Object(Default::default());
-            result["capabilities"]["prompts"]["listChanged"] = Value::Bool(true);
+            // result["capabilities"]["prompts"] = Value::Object(Default::default());
+            // result["capabilities"]["prompts"]["listChanged"] = Value::Bool(true);
             result["serverInfo"] = Value::Object(Default::default());
             result["serverInfo"]["name"] = Value::String("MCP Rust test server".to_string());
             result["serverInfo"]["version"] = Value::String("0.1.0".to_string());
@@ -146,7 +157,7 @@ fn handle_request(request: &JsonRpcRequest) {
                 jsonrpc: "2.0".to_string(),
                 result: Some(result),
             };
-            send_response(&response);
+            send_response(response);
         }
         "ping" => {
             log::info!("Client ping server...");
@@ -155,10 +166,21 @@ fn handle_request(request: &JsonRpcRequest) {
                 jsonrpc: "2.0".to_string(),
                 result: Some(Value::Object(Default::default())),
             };
-            send_response(&response);
+            send_response(response);
         }
         _ => {
             log::error!("Unknown request method: {}", request.method);
+            let err = JsonRpcError {
+                code: ERROR_CODE_INVALID_REQUEST,
+                message: format!("Invalid request: '{}'", request.method),
+                data: None
+            };
+            let response = JsonRpcResponseError {
+                id: request.id.clone(),
+                jsonrpc: "2.0".to_string(),
+                error: Some(err)
+            };
+            send_response(response);
         }
     }
 }
@@ -193,9 +215,21 @@ fn main() {
                 handle_request(&req);
             } else {
                 let notification = serde_json::from_str::<JsonRpcNotification>(&input);
-                match notification {
-                    Ok(notif) => handle_notification(&notif),
-                    Err(e) => log::error!("Error parsing notification: {}", e),
+                if let Ok(notif) = notification {
+                    handle_notification(&notif);
+                } else {
+                    log::error!("Error parsing request: {:?}", request);
+                    let err = JsonRpcError {
+                        code: ERROR_CODE_PARSE_ERROR,
+                        message: "Parse error".to_string(),
+                        data: None
+                    };
+                    let response = JsonRpcResponseError {
+                        id: JsonRpcId::Number(0),
+                        jsonrpc: "2.0".to_string(),
+                        error: Some(err)
+                    };
+                    send_response(response);
                 }
             }
         }
